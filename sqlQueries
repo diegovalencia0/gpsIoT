@@ -1,0 +1,22 @@
+DROP TABLE IF EXISTS `gps_sensor_data`;
+
+CREATE TABLE `gps_sensor_data` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `latitude` float DEFAULT NULL,
+  `longitude` float DEFAULT NULL,
+  `date_time` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4;
+
+
+ALTER TABLE `gps_sensor_data` 
+	CHANGE `latitude` `latitude` double(10,6) DEFAULT NULL ;
+
+ALTER TABLE `gps_sensor_data` 
+	CHANGE `longitude` `longitude` double(10,6) DEFAULT NULL ;
+
+ALTER TABLE `gps_sensor_data` 
+	CHANGE `date_time` `date_time` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL ;
+
+
+SELECT * FROM gps_sensor_data LIMIT 100
