@@ -1,0 +1,251 @@
+#include <WiFi.h>
+#include <TinyGPSPlus.h>//Librería para gps
+#include <HTTPClient.h>//Solicitudes https DE PÁGINA WEB
+#include <ArduinoJson.h>//Envía los datos del sensor a JSON
+#include "time.h"
+#include "twilio.hpp"
+
+#define BUZZER_PIN 18   // Elige el pin GPIO donde está conectado el buzzer
+#define LED_PIN 27       // Pin del led alarma
+#define WIFI_LED_PIN 32  // Pin para led wifi
+
+bool isConnected = false; // Verificar conexión de WIFI
+
+// Conexión a internet
+static const char *ssid = "<RED>";
+static const char *password = "<Password>";
+
+// Conexión para obtener la fecha y hora
+const char *ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = -6 * 60 * 60;
+const int daylightOffset_sec = 0;
+
+// Conexión con la API
+const char *apiEndpoint = "<URL>";//Link al servidor con ruta definida /sensor_data
+
+// Conexión con Twilio
+static const char *account_sid = "<account sid>";
+static const char *auth_token = "<Auth token>";
+static const char *from_number = "whatsapp:+<Twilio number>";
+static const char *to_number = "whatsapp:+<number>";
+static const char *message = "¡ALERTA! Te están robando \nObten más información en: <URL of webiste>";
+
+// Objeto del gps
+TinyGPSPlus gps;
+// Objeto de Twilio
+Twilio *twilio;
+
+void setupWifi()
+{
+   WiFi.begin(ssid, password);
+
+   unsigned long startTime = millis();
+   while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000)
+   {
+       Serial.println("Connecting to WiFi...");
+       delay(500);
+   }
+
+   if (WiFi.status() != WL_CONNECTED)
+   {
+       Serial.println("Failed to connect to WiFi. Please check your credentials");
+       // Puedes agregar un manejo adicional aquí si la conexión WiFi falla
+   }
+   else
+   {
+       isConnected = true;
+       Serial.print("Connected to WiFi: ");
+       Serial.println(WiFi.localIP());
+       digitalWrite(WIFI_LED_PIN, HIGH);
+   }
+}
+
+void checkWifiStatus()
+{
+   if (WiFi.status() == WL_CONNECTED)
+   {
+       if (!isConnected)
+       {
+           isConnected = true;
+           digitalWrite(WIFI_LED_PIN, HIGH); // Encender el LED cuando se conecta
+       }
+   }
+   else
+   {
+       if (isConnected)
+       {
+           isConnected = false;
+           digitalWrite(WIFI_LED_PIN, LOW); // Apagar el LED cuando se desconecta
+       }
+   }
+}
+
+void printLocalTime()
+{
+   struct tm timeinfo;
+   if (!getLocalTime(&timeinfo))
+   {
+       Serial.println("Failed to obtain time");
+       return;
+   }
+   Serial.println(&timeinfo, "%d-%m-%y %H:%M:%S");
+   sendData(1.4, 1.27, &timeinfo);
+}
+
+// Función para imprimir información del gps
+void displayInfo()
+{
+   Serial.print(F("Location: "));
+
+   if (gps.location.isValid())
+   {
+       Serial.print("Lat: ");
+       Serial.print(gps.location.lat(), 6);//Llama al método de la librería y se utilizan 6 decimales
+       Serial.print(F(","));
+       Serial.print("Lng: ");
+       Serial.print(gps.location.lng(), 6);
+       Serial.println();
+   }
+   else
+   {
+       Serial.print(F("INVALID"));
+   }
+}
+
+void sendData(float temperature, float humidity, struct tm *timeinfo)
+{
+   Serial.print("Sending data to API: ");
+
+   HTTPClient http; //Se inicializa el objeto de la librería HTTP
+   http.begin(apiEndpoint);//Concxión con el servidor y ruta definidda para hacer el método POST
+   http.addHeader("Content-Type", "application/json");
+
+   StaticJsonDocument<200> doc;
+
+   doc["latitude"] = String(gps.location.lat(), 6);
+   doc["longitude"] = String(gps.location.lng(), 6);
+
+   char dateTime[30];
+   strftime(dateTime, sizeof(dateTime), "%d-%m-%y %H:%M:%S", timeinfo);
+   doc["date_time"] = dateTime;
+
+   String json;
+   serializeJson(doc, json);
+
+   int httpResponseCode = http.POST(json);
+   if (httpResponseCode > 0)
+   {
+       Serial.print("HTTP Response code: ");//Si se obtiene un 200 es que se realizó el prceso exitosamente y si se recibe un 400 hay un error de conexión
+       Serial.println(httpResponseCode);
+       String responseString = http.getString();
+       Serial.println("Received response: " + responseString);
+   }
+   else
+   {
+       Serial.printf("HTTP Request failed with error code %d: %s\n", httpResponseCode, http.errorToString(httpResponseCode).c_str());
+   }
+   http.end();
+}
+
+void setup()
+{
+   Serial.begin(115200);
+
+   // Setup de led
+   pinMode(LED_PIN, OUTPUT);
+
+   // Setup Twilio
+   twilio = new Twilio(account_sid, auth_token);
+
+   // Setup buzzer
+   pinMode(BUZZER_PIN, OUTPUT);
+
+   // Setup WIFI Led
+   pinMode(WIFI_LED_PIN, OUTPUT);
+
+   // Setup fecha
+   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+   printLocalTime();
+
+   // Conectar WiFi primero
+   setupWifi();
+
+   // Setup del gps después de establecer la conexión WiFi
+   Serial.begin(9600);//Latitud
+   Serial2.begin(9600);//Longitud
+   delay(3000);
+}
+
+void loop()
+{
+   // Verificar conexión Wifi
+   checkWifiStatus();
+
+   // Loop del gps
+
+   //updateSerial(); //Función que se debe comentar después de correr el código una vez
+
+   while (Serial2.available() > 0)
+   {
+       if (gps.encode(Serial2.read()))
+       {
+           displayInfo();
+       }
+   }
+
+//if para comprobar si ha salido del rango
+ if(gps.location.lat()<19.359930 && gps.location.lng()< -99.250000){
+
+   digitalWrite(LED_PIN,HIGH);
+   delay(1000);
+   digitalWrite(LED_PIN,LOW);
+   delay(1000);
+  
+   tone(BUZZER_PIN, 1000); // Genera un tono de 1000 Hz en el pin del buzzer
+   delay(1000); // Mantiene el tono durante 1 segundo
+
+   noTone(BUZZER_PIN); // Detiene el tono
+   delay(500); // Espera 1 segundo antes de volver a generar otro tono
+
+   tone(BUZZER_PIN, 1000); // Genera un tono de 1000 Hz en el pin del buzzer
+   delay(1000); // Mantiene el tono durante 1 segundo
+
+   noTone(BUZZER_PIN); // Detiene el tono
+   delay(500); // Espera 1 segundo antes de volver a generar otro tono
+
+   tone(BUZZER_PIN, 1000); // Genera un tono de 1000 Hz en el pin del buzzer
+   delay(1000); // Mantiene el tono durante 1 segundo
+
+   noTone(BUZZER_PIN); // Detiene el tono
+   delay(500); // Espera 1 segundo antes de volver a generar otro tono
+
+
+   //Loop de Twilio
+
+   String response;
+   bool success = twilio->send_message(to_number, from_number, message, response);
+
+   if (success) {
+     Serial.println("Sent message successfully!");
+   } else {
+     Serial.println(response);
+   }
+
+   delay(10000);  // Esperar 10 segundos antes de enviar el siguiente mensaje
+
+
+   }
+
+   else{
+     digitalWrite(LED_PIN,LOW);
+   }
+  
+
+   delay(1000);
+   if (WiFi.status() != WL_CONNECTED)
+   {
+       Serial.println("WiFi Disconnected. Reconnecting...");
+       setupWifi();
+   }
+   printLocalTime();
+}
