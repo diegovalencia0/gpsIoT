@@ -1,0 +1,64 @@
+from flask import Flask, render_template, jsonify, request
+from datetime import date, datetime, timedelta
+import mysql.connector
+from flask import Flask, render_template
+from io import BytesIO
+import base64
+
+app = Flask(__name__)
+
+
+
+def createConnection(user_name, database_name, user_password, host, port):
+   cnx = mysql.connector.connect(
+       user=user_name, database=database_name, password=user_password, host=host, port=port)
+   cursor = cnx.cursor()
+   return (cnx, cursor)
+
+@app.route('/', methods=['GET'])
+def get_sensor_data():
+   # Create a connection to the database
+   cnx, cursor = createConnection('sql3664231', 'sql3664231', 'dpRneZIuck', 'sql3.freemysqlhosting.net', '3306')
+
+   # Query the database
+   query = ("SELECT * FROM gps_sensor_data")
+
+   # Execute the query
+   cursor.execute(query)
+
+   # Get the data
+   data = cursor.fetchall()
+
+   # Close the connection
+   cursor.close()
+   cnx.close()
+
+   # Obtener los valores de x e y desde los datos
+   mapLatitude = [item[1] for item in data]
+   mapLongitude = [item[2] for item in data]
+   mapDatetime = [item[3] for item in data]
+
+   # Renderizar la plantilla HTML con los datos
+   return render_template('index.html', mapLatitude=mapLatitude, mapLongitude=mapLongitude)
+
+@app.route('/sensor_data', methods=['POST'])
+def receive_sensor_data():
+   if request.headers['Content-Type'] == 'application/json':
+       data = request.json
+
+       latitude = data.get('latitude')
+       longitude = data.get('longitude')
+       date_time = data.get('date_time') # "2021-08-08 12:00:00"
+
+       cnx, cursor = createConnection('sql3664231', 'sql3664231', 'dpRneZIuck', 'sql3.freemysqlhosting.net', '3306')
+
+       add_data = ("INSERT INTO gps_sensor_data (latitude, longitude, date_time) VALUES (%s, %s, %s)")
+      
+       cursor.execute(add_data, (latitude, longitude, date_time))
+       cnx.commit()
+       cursor.close()
+       cnx.close()
+
+       return 'Data received successfully.', 200
+   else:
+       return 'Invalid content type. Expected application/json.', 400
